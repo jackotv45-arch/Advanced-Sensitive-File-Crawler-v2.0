@@ -4,13 +4,18 @@ set -e
 
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║  Advanced Sensitive File Crawler v2.1                    ║"
-echo "║  With Interactive Menu                                   ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
+
+ARCH=$(uname -m)
+OS=$(uname -s)
+
+echo -e "Architecture détectée: ${YELLOW}$ARCH${NC}"
+echo -e "OS: ${YELLOW}$OS${NC}"
 
 # Check Python
 PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}' | cut -d. -f1,2)
@@ -33,36 +38,47 @@ fi
 source $VENV_DIR/bin/activate
 pip install --upgrade pip
 
-# Install requirements
-echo -e "${YELLOW}Installing dependencies...${NC}"
-pip install -r requirements.txt
+# Install core requirements (sans Playwright d'abord)
+echo -e "${YELLOW}Installing core dependencies...${NC}"
+pip install aiohttp>=3.9.0 aiofiles rich questionary beautifulsoup4 lxml aiodns
 
-# Install Playwright
-echo -e "${YELLOW}Installing Playwright browsers...${NC}"
-playwright install chromium
+# Try to install Playwright (peut échouer sur ARM)
+echo -e "${YELLOW}Attempting Playwright installation...${NC}"
+pip install playwright || echo -e "${YELLOW}⚠ Playwright pip install failed, will try alternative${NC}"
 
-# Make executable
-chmod +x crawler.py
-
-# Create symlink for easy access
-if [ ! -f "/usr/local/bin/sensitive-crawler" ] && [ "$EUID" -eq 0 ]; then
-    ln -sf "$(pwd)/crawler.py" /usr/local/bin/sensitive-crawler
-    echo -e "${GREEN}✓ Created system command: sensitive-crawler${NC}"
+# Install browsers only if Playwright installed
+if python3 -c "import playwright" 2>/dev/null; then
+    echo -e "${YELLOW}Installing Playwright browsers...${NC}"
+    
+    # Détection architecture pour Playwright
+    if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+        echo -e "${YELLOW}Architecture ARM64 détectée - Installation spécifique...${NC}"
+        # Sur ARM, il faut parfois installer Chromium manuellement
+        playwright install chromium || {
+            echo -e "${RED}⚠ Playwright browser install failed${NC}"
+            echo -e "${YELLOW}Le crawler fonctionnera sans JavaScript rendering${NC}"
+        }
+    else
+        playwright install chromium || {
+            echo -e "${RED}⚠ Playwright browser install failed${NC}"
+            echo -e "${YELLOW}Le crawler fonctionnera sans JavaScript rendering${NC}"
+        }
+    fi
+else
+    echo -e "${YELLOW}⚠ Playwright not available - JS rendering disabled${NC}"
 fi
+
+chmod +x crawler.py
 
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}║  Installation Complete!                                  ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo "Usage modes:"
-echo "  Interactive:  python crawler.py --interactive"
-echo "  CLI:          python crawler.py https://target.com"
+echo "Usage:"
+echo "  Interactive:  ./crawler.py --interactive"
+echo "  CLI:          ./crawler.py https://target.com"
 echo ""
-echo "Quick start:"
-echo "  source $VENV_DIR/bin/activate"
-echo "  python crawler.py -i"
-echo ""
-
-# Test
-python3 -c "import rich, questionary, aiohttp, playwright; print('✓ All dependencies OK')"
+if ! python3 -c "import playwright" 2>/dev/null; then
+    echo -e "${YELLOW}Note: JavaScript rendering unavailable (install Playwright manually for JS support)${NC}"
+fi
